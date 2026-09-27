@@ -60,6 +60,19 @@ class LayeredModel:
     def min_vs(self) -> float:
         return min(l.vs_kms for l in self.layers)
 
+    def velocity_at_depth(self, depth_km: float, phase: str) -> float:
+        """Velocity of the layer containing ``depth_km`` (for takeoff angles)."""
+        if phase not in ("P", "S"):
+            raise ValueError("phase must be 'P' or 'S'")
+        depth_km = max(0.0, float(depth_km))
+        z = 0.0
+        for layer in self.layers:
+            v = layer.vp_kms if phase == "P" else layer.vs_kms
+            if layer.thickness_km is None or z + layer.thickness_km >= depth_km:
+                return v
+            z += layer.thickness_km
+        return self.layers[-1].vp_kms if phase == "P" else self.layers[-1].vs_kms
+
     def _traversed(self, depth_km: float, phase: str) -> list[tuple[float, float]]:
         """(thickness, velocity) pairs from the surface down to the source."""
         depth_km = max(0.0, float(depth_km))

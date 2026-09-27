@@ -377,6 +377,75 @@ class StationAuditResult(Base):
 
 
 # --------------------------------------------------------------------------- #
+# P-wave first-motion focal mechanism inversion
+#
+# For one event of a completed run the client submits the event's associated P
+# picks with first-motion polarities and weights.  The service computes ray
+# azimuth/takeoff through the run's layered velocity model, grid-searches
+# double-couple (strike, dip, rake) on a 10-degree grid and keeps every
+# mechanism whose weighted polarity misfit equals the minimum (a nodal --
+# zero-amplitude -- prediction counts as a misfit).  Mechanisms equivalent
+# under swapping the two nodal planes are deduplicated; each surviving
+# solution reports both planes, its misfit weight and the per-station
+# observed/predicted polarities.  Like the catalog and the station audit this
+# layer never modifies ingestions/runs/events/picks or catalog content.
+# --------------------------------------------------------------------------- #
+class FocalMechanismInversion(Base):
+    """One idempotent first-motion inversion bound to an event/model/polarity set."""
+
+    __tablename__ = "focal_mechanism_inversions"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    # Idempotency key: canonical hash of (event, model version, normalized
+    # polarity set).  Concurrent identical requests collapse on this index.
+    request_hash = Column(String(64), nullable=False, unique=True, index=True)
+    request = Column(JSON, nullable=False)
+    event_id = Column(String(36), ForeignKey("events.id"), nullable=False, index=True)
+    run_id = Column(String(36), ForeignKey("runs.id"), nullable=False, index=True)
+    # Frozen inversion context: velocity model snapshot, hypocenter, the
+    # normalized polarity set and per-station ray geometry (azimuth/takeoff).
+    frozen = Column(JSON, nullable=False)
+    grid_step_deg = Column(Float, nullable=False)
+    station_count = Column(Integer, nullable=False)
+    solution_count = Column(Integer, nullable=False)
+    min_misfit_weight = Column(Float, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_focal_inversions_created", "created_at", "id"),
+    )
+
+
+class FocalMechanismSolution(Base):
+    """One tied best-fitting double-couple solution of an inversion.
+
+    Rows are written once in their stable presentation order (strike, dip,
+    rake), so ``(inversion_id, sort_index)`` doubles as the keyset-pagination
+    order.
+    """
+
+    __tablename__ = "focal_mechanism_solutions"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    inversion_id = Column(
+        String(36),
+        ForeignKey("focal_mechanism_inversions.id"),
+        nullable=False,
+        index=True,
+    )
+    sort_index = Column(Integer, nullable=False)
+    misfit_weight = Column(Float, nullable=False)
+    misfit_count = Column(Integer, nullable=False)
+    # Both nodal planes plus per-station observed/predicted polarities.
+    detail = Column(JSON, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("inversion_id", "sort_index", name="uq_focal_solution_order"),
+        Index("ix_focal_solutions_inversion_sort", "inversion_id", "sort_index"),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # catalog alert orchestration
 #
 # Administrators define immutable alert rule versions over the published

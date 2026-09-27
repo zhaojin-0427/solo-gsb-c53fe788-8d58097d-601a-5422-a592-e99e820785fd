@@ -154,6 +154,30 @@ class StationAuditCreate(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# P-wave first-motion focal mechanism inversion
+# --------------------------------------------------------------------------- #
+class PolarityObservationIn(BaseModel):
+    """One associated P pick's first-motion polarity and weight."""
+
+    pick_id: str = Field(min_length=1, max_length=36)
+    polarity: Literal["positive", "negative"]
+    weight: float = Field(default=1.0, gt=0.0, le=10.0)
+
+
+class FocalMechanismCreate(BaseModel):
+    """Invert P first-motion polarities of a completed run's event.
+
+    ``event_id`` selects the event; every ``pick_id`` must be one of the
+    event's associated P picks.  At most one polarity per station (conflicting
+    polarities at one station are rejected); at least six independent stations
+    and a maximum azimuthal gap below 180 degrees are required.
+    """
+
+    event_id: str = Field(min_length=1, max_length=36)
+    observations: list[PolarityObservationIn] = Field(min_length=1, max_length=512)
+
+
+# --------------------------------------------------------------------------- #
 # catalog alert orchestration
 # --------------------------------------------------------------------------- #
 class AlertRuleCreate(BaseModel):

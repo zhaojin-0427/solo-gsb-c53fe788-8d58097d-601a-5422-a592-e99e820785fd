@@ -10,6 +10,8 @@
 
 最后，针对任一**已完成 run 的 event**可生成**台站影响审计（station impact audit / leave-one-station-out）**：冻结该事件的原始拾取、速度模型、校准版本与处理参数，在原始关联拾取子集上逐一移除每个参与台站的**全部 P/S 拾取**后重新关联定位，比较发震时刻、经纬深度、RMS、质量等级、关联拾取集合与不可解原因，按**事件消失 → 质量降级 → RMS 增幅 → 台站码**稳定排序并标出**关键台站**。审计报告绑定 event、run 与参数哈希，重复请求幂等，列表与逐台结果均支持分页；审计只读，**原事件、run 与目录内容绝不改变**。
 
+针对**已完成事件**还可做 **P 波初动震源机制反演（first-motion focal mechanism inversion）**：客户端提交该事件关联 P 拾取的**正负极性与权重**，服务用事件震源位置、台站坐标与该 run 的分层速度模型求每条射线的**方位角与出射角**，在 **10° 网格**上搜索双力偶（走向、倾角、滑动角），以**加权极性误判最少**选解（预测零幅值的节面台站按误判计）；**互换节面的等价解去重**后，每组解返回**两个节面、误判权重与逐台站观测/预测**，同分最优解按（走向， 倾角， 滑动角）稳定排序并支持游标分页。非关联拾取、同站矛盾极性、少于六个独立台站或最大方位空档 ≥ 180° 均被明确拒绝；反演按（事件， 模型版本， 规范化极性集）幂等保存，并发同请求只产生一份结果，且**不改动原事件、run 与目录**。
+
 在此之上还有**目录告警编排（catalog alert orchestration）**：管理员针对**已发布目录**定义**不可变的告警规则版本**（质量等级、台站数、RMS、发震时刻时间窗、圆形区域条件可任意组合，另含合并时间间隔），以 `expected_revision` 做 CAS 发布（草稿 → 发布 → 停用）；对指定**目录编译批次**做评估时，按规则对每个（规则， 条目）匹配生成**确定性的命中记录**，同一规则的连续命中在合并间隔内合并为一条告警（抑制），命中已确认/已解除的告警则将其**升级**回打开；告警支持**确认**、**解除**与**幂等重评估**；目录条目撤回后只自动关闭**未确认**告警，命中与状态迁移全程留痕（审计链）；并发评估在唯一约束与序列化临界区保证下**不重复、不漏报**，查询均提供稳定游标。
 
 ## 功能特性
@@ -24,6 +26,7 @@
 - **跨运行震情目录**：对多个已完成 run 的事件按时间窗/空间半径/最小质量/版本条件确定性聚类；同一地震合并为不可变条目，质量最高且 RMS 最小者为主解（同质量同 RMS 按 run/event ID 决胜），冲突解作为候选并附相对主解偏差；草稿/发布/撤回状态机 + `expected_revision` 乐观锁，重复请求幂等，撤回不改写已发布内容；查询支持时间/区域/质量/状态过滤与稳定游标分页
 - **台站影响审计**：冻结已完成事件的原始关联拾取、速度模型、校准版本（含逐站 P/S 偏移）与处理参数；逐一移除每个参与台站的全部 P/S 拾取并用同一确定性关联/定位重算；输出事件是否消失、发震时刻/经纬深度/RMS 增量、质量等级、关联（保留/丢弃）拾取集合与不可解原因；按事件消失 → 质量降级深度 → RMS 增幅 → 台站码稳定排序，关键台站（事件消失或质量降级）显式标注；报告绑定 event/run/参数哈希，幂等可重放，列表与逐台结果均支持游标分页，且不改动任何 run/event/目录内容
 - **目录告警编排**：针对已发布目录的不可变告警规则版本（质量/台站数/RMS/时间窗/圆形区域 + 合并间隔），`expected_revision` CAS 发布与停用；按目录编译批次做确定性评估，每个（规则， 条目）匹配恰好记录一次命中；连续命中按规则与合并间隔合并（抑制），命中已确认/已解除告警则升级回打开；支持确认、解除与幂等重评估；条目撤回只关闭未确认告警且审计链完整保留；并发评估不重复不漏报；全部列表查询提供稳定游标
+- **P 波初动震源机制反演**：针对已完成事件的关联 P 拾取提交正负极性与权重；用事件震源位置、台站坐标与该 run 的分层速度模型求射线方位角/出射角，10° 网格搜索双力偶（走向/倾角/滑动角），加权极性误判最少者入选（零幅值按误判计）；互换节面的等价解经矩张量规范键去重，每组解返回两个节面、误判权重与逐台站观测/预测；同分最优解稳定排序 + 游标分页；非关联拾取、同站矛盾极性、< 6 独立台站、最大方位空档 ≥ 180° 明确拒绝；按（事件， 模型版本， 规范化极性集）幂等，并发同请求折叠为一份，只写独立反演表
 - **明确拒绝**：缺采样率、坐标越界、数据不足、校准门槛不达标等均以结构化错误码拒绝
 
 ## 快速启动（Docker Compose）
@@ -43,6 +46,7 @@ docker compose up --build
 | `http://localhost:8000/v1/models` | 速度模型列表 |
 | `http://localhost:8000/v1/catalog/entries` | 跨运行目录条目 |
 | `http://localhost:8000/v1/alert-rules`、`http://localhost:8000/v1/alerts` | 告警规则与告警事件 |
+| `http://localhost:8000/v1/focal-mechanisms` | P 波初动震源机制反演 |
 
 ## 示例请求
 
@@ -385,6 +389,82 @@ curl -s "http://localhost:8000/v1/station-audits/<audit_id>/results?limit=20"
 - 审计/结果不存在返回 `404 station_audit_not_found`；列表按未知 `event_id`/`run_id` 过滤返回对应 404。
 - 审计创建后内容不可变；审计**不修改原事件与目录**，`process`、`replay`、`compare`、目录编译/发布/撤回的请求、响应与幂等键均保持原样。
 
+## P 波初动震源机制反演（first-motion focal mechanism）
+
+反演是叠加在已完成事件之上的**只读分析层**（与目录、审计同级）：客户端针对已完成 run 的某个 event，提交其**关联 P 拾取**的初动极性（`positive`/`negative`）与权重；服务用**事件震源位置、台站坐标和该 run 的分层速度模型**求每条 P 射线的**方位角**（自北顺时针）与**出射角**（自向下垂直方向量起，> 90° 为向上出射，由射线参数 `sin(i) = p·v_震源` 精确求取），然后在 **10° 网格**上搜索双力偶（走向 0–350°、倾角 10–90°、滑动角 −180–170°），以**加权极性误判最少**选出全部最优解。
+
+### 选解规则（确定性）
+
+- **误判**：某台站的预测初动符号（P 辐射花样 `(x·n)(x·u)` 的符号）与观测极性不一致即计一次误判，误判代价为该台站权重；**预测零幅值（节面上，|A| ≤ 1e-6）一律按误判计**。
+- **等价解去重**：互换两个节面（法向量 ↔ 滑动矢量）得到的是同一双力偶；网格搜索用规范化矩张量键去重，每个机制只保留一个代表解。
+- **同分最优解**：所有加权误判等于最小值的机制全部保留，按 **（走向， 倾角， 滑动角）** 全序稳定排序（持久化为连续 `solution_index`，即分页顺序）；每组解返回**两个节面**（`plane_1`/`plane_2`）、`misfit_weight`、`misfit_count` 与**逐台站观测/预测**（方位角、出射角、观测极性、预测极性/幅值、是否匹配）。
+
+### 1. 提交反演（幂等）
+
+```bash
+curl -s -X POST http://localhost:8000/v1/focal-mechanisms \
+  -H 'Content-Type: application/json' -d '{
+    "event_id": "<event_id>",
+    "observations": [
+      {"pick_id": "<p_pick_id_1>", "polarity": "positive", "weight": 1.0},
+      {"pick_id": "<p_pick_id_2>", "polarity": "negative", "weight": 0.5}
+    ]}' | python -m json.tool
+```
+
+- 首次 `201 created=true`；按（**事件， 模型版本， 规范化极性集**）的规范哈希幂等：同一事件同一极性集（与提交顺序无关；同站同极性的重复提交按最大权重合并）重复提交返回 `200` 与**同一 `inversion_id`/解集**；并发相同请求在唯一索引上折叠为一份结果。
+- 校验（明确拒绝，不产生任何状态）：事件不存在 `404 event_not_found`；拾取不存在 `404 pick_not_found`；拾取不是该事件的关联 P 拾取（含 S 拾取、他事件拾取、未关联拾取）`422 pick_not_associated`；同一台站提交矛盾极性 `422 contradictory_polarity`；独立台站少于 6 个 `422 insufficient_polarity_stations`；最大方位空档 ≥ 180° `422 azimuthal_gap_too_large`。
+
+响应节选（8 台站、最小误判 0、68 组同分最优解中的第一组）：
+
+```json
+{
+  "inversion_id": "…", "created": true,
+  "event_id": "…", "run_id": "…",
+  "grid_step_deg": 10.0, "station_count": 8,
+  "min_misfit_weight": 0.0, "solution_count": 68,
+  "frozen": {
+    "model": {"name": "default", "version": "1.0", "layers": [ … ]},
+    "hypocenter": {"origin_time": "…", "latitude": 35.05, "longitude": -117.95, "depth_km": 12.0},
+    "stations": [{"station": "EX00", "latitude": 35.25, "…": "…",
+                  "azimuth_deg": 348.34, "takeoff_deg": 119.39}],
+    "polarities": [{"station": "EX00", "pick_id": "…", "polarity": "negative", "weight": 1.0}],
+    "azimuthal_gap_deg": 58.07
+  },
+  "solutions": [{
+    "solution_index": 0,
+    "plane_1": {"strike_deg": 20.0, "dip_deg": 40.0, "rake_deg": -90.0},
+    "plane_2": {"strike_deg": 200.0, "dip_deg": 50.0, "rake_deg": -90.0},
+    "misfit_weight": 0.0, "misfit_count": 0,
+    "observations": [{
+      "station": "EX00", "pick_id": "…",
+      "azimuth_deg": 348.34, "takeoff_deg": 119.39,
+      "observed": "negative", "weight": 1.0,
+      "predicted": "negative", "amplitude": -0.0545, "match": true
+    }]
+  }],
+  "next_cursor": "…"
+}
+```
+
+`frozen` 在创建时固化模型分层、震源位置、逐台站射线几何与规范化极性集，保证反演可复现；`solutions` 为同分最优解的第一页（默认 50 条），`next_cursor` 继续翻页。
+
+### 2. 查询与分页
+
+```bash
+# 反演列表（可按 event_id 过滤），稳定键集分页 (created_at, inversion_id)
+curl -s "http://localhost:8000/v1/focal-mechanisms?event_id=<event_id>&limit=50"
+
+# 单个反演（含冻结快照与同分最优解第一页）
+curl -s http://localhost:8000/v1/focal-mechanisms/<inversion_id>
+
+# 同分最优解逐页遍历（稳定 (strike, dip, rake) 顺序），不透明 next_cursor
+curl -s "http://localhost:8000/v1/focal-mechanisms/<inversion_id>/solutions?limit=50"
+```
+
+- 解分页游标绑定具体反演，跨反演复用返回 `422 invalid_cursor`；列表游标携带 `(event_id, limit)` 查询指纹，换过滤条件复用同样 `422 invalid_cursor`。
+- 反演不存在返回 `404 focal_mechanism_not_found`；列表按未知 `event_id` 过滤返回 `404 event_not_found`。
+- 反演创建后内容不可变；反演**不修改原事件、run、拾取或目录内容**，`process`、`replay`、`compare`、目录与审计接口语义保持原样。
+
 ## 目录告警编排（catalog alert orchestration）
 
 告警是叠加在**已发布目录**之上的规则驱动层：管理员定义**不可变的告警规则版本**并以 CAS 发布；对任一**目录编译批次**做评估时，服务按规则对批次内**已发布条目**逐条匹配，为每个（规则， 条目）匹配生成**恰好一次**的确定性命中记录，并把连续命中按规则与合并间隔编排成告警事件。该层只读目录、只写自己的表：`process`/`replay`/`compare`、校准、目录与审计接口语义完全不变。
@@ -509,6 +589,10 @@ curl -s "http://localhost:8000/v1/alerts/evaluations?compilation_id=<compilation
 | GET | `/v1/station-audits` | 审计列表（可按 `event_id`/`run_id` 过滤，稳定游标分页） |
 | GET | `/v1/station-audits/{audit_id}` | 查询单个审计（含冻结快照、基线与全部逐台结果） |
 | GET | `/v1/station-audits/{audit_id}/results` | 逐台审计结果分页（稳定排序顺序，游标分页） |
+| POST | `/v1/focal-mechanisms` | P 波初动震源机制反演（10° 网格搜索，等价解去重；同请求幂等，首次 201，重复 200） |
+| GET | `/v1/focal-mechanisms` | 反演列表（可按 `event_id` 过滤，稳定游标分页） |
+| GET | `/v1/focal-mechanisms/{inversion_id}` | 查询单个反演（含冻结快照与同分最优解第一页） |
+| GET | `/v1/focal-mechanisms/{inversion_id}/solutions` | 同分最优解分页（稳定 (strike, dip, rake) 顺序，游标分页） |
 | POST | `/v1/alert-rules` | 创建不可变告警规则版本（同 `(name, version)` 同内容幂等；内容不同 409） |
 | GET | `/v1/alert-rules`、`/v1/alert-rules/{rule_id}` | 列出（`name`/`status` 过滤 + 游标分页）/查看告警规则 |
 | POST | `/v1/alert-rules/{rule_id}/publish` | 发布草稿规则（`expected_revision` CAS，重复幂等） |
@@ -577,8 +661,14 @@ curl -s "http://localhost:8000/v1/alerts/evaluations?compilation_id=<compilation
 | `event_id` | 已完成 run 中的事件 ID（必填） |
 | `min_keep_stations` | 逐台移除后重定位事件需满足的**最少保留台站数**（默认 4，范围 2–200）；必须满足 `min_keep_stations <= N-1`（N 为该事件参与台站数），否则 `422 min_keep_stations_too_high`。重算仍沿用原 run 的模型、校准与 `max_residual_s`/`min_stations` 语义，仅最小台站门槛取本字段 |
 
-### `POST /v1/alert-rules` 请求体
+### `POST /v1/focal-mechanisms` 请求体
 
+| 字段 | 含义 |
+|---|---|
+| `event_id` | 已完成 run 中的事件 ID（必填） |
+| `observations` | 极性观测列表（1–512 条）：`pick_id`（必须是该事件的**关联 P 拾取**）、`polarity`（`positive`/`negative`）、`weight`（0–10，默认 1.0）。同一台站只接受一种极性：同站同极性的重复提交按最大权重合并，同站矛盾极性返回 `422 contradictory_polarity`；规范化后独立台站须 ≥ 6 且最大方位空档 < 180° |
+
+### `POST /v1/alert-rules` 请求体
 | 字段 | 含义 |
 |---|---|
 | `name` / `version` | 规则名与版本号（`(name, version)` 唯一、不可变） |
@@ -619,6 +709,7 @@ curl -s "http://localhost:8000/v1/alerts/evaluations?compilation_id=<compilation
 - **跨运行编译幂等**：编译按完整请求的规范哈希去重（唯一索引），重复与并发相同请求返回同一 `compilation_id` 与条目 ID；条目内容在创建后不可变，仅状态机迁移（草稿→发布→撤回）更新 `revision`/时间戳/撤回原因；同一目标状态的重复发布/撤回为 no-op，不改时间戳也不增加 revision。
 - **目录不影响既有语义**：编译/发布/撤回只新增目录表，不修改 ingestions/runs/events/picks；`process`、`replay`、`compare` 与校准接口的请求、响应与幂等键均保持原样。
 - **台站影响审计幂等且只读**：审计按 `(event_id, run_id, min_keep_stations)` 的规范哈希（`request_hash`）去重，重复/并发相同请求返回同一 `audit_id` 与逐台结果；不同 `min_keep_stations` 是不同审计（`params_hash` 同时绑定 run、模型/校准版本、原参数与本次门槛）。审计在内存中重算关联/定位，只写独立的审计表，冻结的拾取/模型/校准/参数随报告固化；它**不修改原事件、run、拾取或目录内容**，`process`、`replay`、`compare` 与目录接口语义保持原样。
+- **震源机制反演幂等且只读**：反演按 `(事件, 模型版本, 规范化极性集)` 的规范哈希（`request_hash`）去重——极性集按台站排序、同站同极性重复项按最大权重合并，因此与提交顺序无关；重复/并发相同请求在唯一索引上折叠为同一 `inversion_id` 与解集。模型分层、震源位置、逐台站射线几何与极性集随报告冻结，同分最优解一次性持久化并按（走向， 倾角， 滑动角）稳定排序分页；反演只写独立的反演表，**不修改原事件、run、拾取或目录内容**，既有接口的请求、响应与幂等键均保持原样。
 - **目录告警编排幂等且只增不改**：规则版本内容自创建起不可变，仅生命周期迁移（草稿→发布→停用）更新 `revision`/时间戳；评估按规范请求哈希去重（唯一索引），重复请求即幂等重评估，只补录新匹配；命中以 `(rule_id, entry_id)` 唯一约束保证任何并发下不重复，序列化临界区（进程内锁 + PostgreSQL 咨询锁）保证评估/确认/解除/撤回联动互不交错、不漏报；告警确认/解除是幂等迁移，条目撤回只关闭未确认告警且不改写任何命中与审计链；告警层不写 ingestions/runs/events/picks 与目录内容，既有接口的请求、响应与幂等键均保持原样。
 
 ## 错误码
@@ -653,6 +744,10 @@ curl -s "http://localhost:8000/v1/alerts/evaluations?compilation_id=<compilation
 | 404 | `station_audit_not_found` | 台站影响审计不存在 |
 | 422 | `min_keep_stations_too_high` | 最少保留台站数不小于事件参与台站数（移除一台后无法满足） |
 | 422 | `audit_event_has_no_picks` | 审计目标事件没有关联拾取 |
+| 404 | `pick_not_found` / `focal_mechanism_not_found` | 拾取 / 震源机制反演不存在 |
+| 422 | `pick_not_associated` | 拾取不是该事件的关联 P 拾取（含 S 拾取、他事件拾取、未关联拾取） |
+| 422 | `contradictory_polarity` | 同一台站提交了矛盾的正负极性 |
+| 422 | `insufficient_polarity_stations` / `azimuthal_gap_too_large` | 独立台站少于 6 个 / 最大方位空档不小于 180° |
 | 404 | `alert_rule_not_found` / `alert_not_found` / `alert_evaluation_not_found` | 告警规则 / 告警 / 评估不存在 |
 | 409 | `alert_rule_version_conflict` | 同 `(name, version)` 规则内容不同（规则版本不可变） |
 | 409 | `alert_rule_not_published` / `alert_rule_retired` | 草稿规则不可停用/评估 / 规则已停用不可再发布或评估 |
@@ -666,7 +761,7 @@ curl -s "http://localhost:8000/v1/alerts/evaluations?compilation_id=<compilation
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-pytest tests/ -q                 # 111 个测试（走时/定位/关联/Huber/校准生命周期/校准幂等/跨运行目录聚类/生命周期/分页/台站影响审计 leave-one-out/幂等/分页/只读/目录告警编排规则生命周期/评估幂等/合并抑制升级/确认解除/撤回联动/并发/游标，端到端 API，SQLite）
+pytest tests/ -q                 # 135 个测试（走时/定位/关联/Huber/校准生命周期/校准幂等/跨运行目录聚类/生命周期/分页/台站影响审计 leave-one-out/幂等/分页/只读/目录告警编排规则生命周期/评估幂等/合并抑制升级/确认解除/撤回联动/并发/游标/P 波初动震源机制反演网格搜索/等价解去重/拒绝/幂等/分页/只读，端到端 API，SQLite）
 DATABASE_URL=sqlite:////tmp/dev.db uvicorn app.main:app --reload   # 无 PostgreSQL 时本地调试
 ```
 
@@ -679,7 +774,7 @@ app/
   main.py               # FastAPI 入口、建表、默认模型播种、异常处理
   config.py             # 固定处理参数与阈值（环境变量 DATABASE_URL）
   database.py           # 引擎/会话
-  models.py             # SQLAlchemy 表（模型/摄取/波形/拾取/run/事件/校准/目录/审计/告警）
+  models.py             # SQLAlchemy 表（模型/摄取/波形/拾取/run/事件/校准/目录/审计/震源机制反演/告警）
   schemas.py            # Pydantic 请求模型
   api/routes.py         # HTTP 路由
   services/
@@ -693,9 +788,11 @@ app/
     catalog.py          # 跨 run 确定性聚类（时间/空间/台站证据）与主解决胜
     catalog_pipeline.py # 目录编译/发布撤回（乐观锁）/游标分页/来源链编排/撤回联动关闭告警
     station_audit.py    # 台站影响审计：冻结基线、逐台移除 P/S 重关联定位、关键台站与稳定排序/分页
+    focal_mechanism.py  # P 波初动震源机制反演：射线方位/出射角、10° 网格搜索双力偶、
+                        # 矩张量键等价解去重、同分最优解稳定分页、幂等冻结保存
     alerting.py         # 目录告警编排：不可变规则版本与 CAS 生命周期、确定性评估与命中合并（抑制/升级）、
                         # 确认/解除、撤回联动关闭、序列化临界区与游标分页
     pipeline.py         # 摄取/关联/重放/校准创建与原子激活/比较编排与持久化
 scripts/make_example.py # 生成合成示例请求
-tests/                  # pytest（单元 + 端到端，111 个测试，SQLite）
+tests/                  # pytest（单元 + 端到端，135 个测试，SQLite）
 ```
