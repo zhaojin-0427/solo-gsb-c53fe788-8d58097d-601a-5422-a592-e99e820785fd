@@ -18,12 +18,13 @@ from ..schemas import (
     CatalogCompileRequest,
     CatalogPublishRequest,
     CatalogWithdrawRequest,
+    FocalMechanismCreate,
     ModelCreate,
     ProcessRequest,
     ReplayRequest,
     StationAuditCreate,
 )
-from ..services import alerting, catalog_pipeline, pipeline, station_audit
+from ..services import alerting, catalog_pipeline, focal_mechanism, pipeline, station_audit
 from ..services.pipeline import ApiError
 
 router = APIRouter()
@@ -248,6 +249,44 @@ def list_station_audit_results(
 ):
     """Paginate the per-station audit results in their stable presentation order."""
     return station_audit.list_results(db, audit_id, limit, cursor)
+
+
+# --------------------------------------------------------------------------- #
+# P-wave first-motion focal mechanism inversion
+# --------------------------------------------------------------------------- #
+@router.post("/v1/focal-mechanisms", status_code=201)
+def create_focal_mechanism(body: FocalMechanismCreate, db: Session = Depends(get_db)):
+    """Invert P first-motion polarities of a completed event (idempotent)."""
+    payload, created = focal_mechanism.create_mechanism(db, body)
+    return JSONResponse(payload, status_code=201 if created else 200)
+
+
+@router.get("/v1/focal-mechanisms")
+def list_focal_mechanisms(
+    event_id: str | None = Query(default=None, description="filter by event id"),
+    run_id: str | None = Query(default=None, description="filter by run id"),
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """List focal mechanism inversions with keyset pagination (created_at, id)."""
+    return focal_mechanism.list_mechanisms(db, event_id, run_id, limit, cursor)
+
+
+@router.get("/v1/focal-mechanisms/{mechanism_id}")
+def get_focal_mechanism(mechanism_id: str, db: Session = Depends(get_db)):
+    return focal_mechanism.get_mechanism(db, mechanism_id)
+
+
+@router.get("/v1/focal-mechanisms/{mechanism_id}/solutions")
+def list_focal_mechanism_solutions(
+    mechanism_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Paginate the tied best solutions in their stable presentation order."""
+    return focal_mechanism.list_solutions(db, mechanism_id, limit, cursor)
 
 
 # --------------------------------------------------------------------------- #

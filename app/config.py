@@ -30,6 +30,12 @@ QUALITY_THRESHOLDS = (
     ("C", 2.0, 4),
 )
 
+# P-wave first-motion focal mechanism inversion.
+FM_GRID_STEP_DEG = 10.0            # strike/dip/rake grid spacing
+FM_MIN_STATIONS = 6                # minimum independent polarity stations
+FM_MAX_AZIMUTHAL_GAP_DEG = 180.0  # reject when the largest azimuth gap is >= this
+FM_ZERO_AMPLITUDE_EPS = 1e-9     # |amplitude| below this sits on a nodal plane
+
 # Seed model so the API is usable out of the box.
 DEFAULT_MODEL_NAME = "default"
 DEFAULT_MODEL_VERSION = "1.0"

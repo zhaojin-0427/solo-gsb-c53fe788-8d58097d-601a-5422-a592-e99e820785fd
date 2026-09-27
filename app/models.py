@@ -377,6 +377,85 @@ class StationAuditResult(Base):
 
 
 # --------------------------------------------------------------------------- #
+# P-wave first-motion focal mechanism inversion
+#
+# For one event of a completed run the client submits the event's associated
+# P picks with observed polarities and weights.  The service computes ray
+# azimuths and takeoff angles from the event hypocenter, the station
+# coordinates and the run's layered velocity model, then grid-searches
+# double-couple strike/dip/rake on a 10-degree grid for the mechanisms with
+# the minimum weighted polarity misfit (zero radiation amplitude counts as a
+# misfit).  Mechanisms equivalent under nodal-plane swap are de-duplicated;
+# each solution reports both nodal planes, its misfit weight and the
+# per-station observed/predicted polarities.  Inversions are idempotent per
+# (event, model version, normalized polarity set) and read-only: runs,
+# events, picks and the catalog are never modified.
+# --------------------------------------------------------------------------- #
+class FocalMechanism(Base):
+    """One focal mechanism inversion bound to an event/model/polarity set."""
+
+    __tablename__ = "focal_mechanisms"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    # Idempotency key: canonical hash of (event, model version, normalized
+    # per-station polarity set).
+    request_hash = Column(String(64), nullable=False, unique=True, index=True)
+    request = Column(JSON, nullable=False)
+    params_hash = Column(String(64), nullable=False)  # canonical inversion params
+    event_id = Column(String(36), ForeignKey("events.id"), nullable=False, index=True)
+    run_id = Column(String(36), ForeignKey("runs.id"), nullable=False, index=True)
+    model_id = Column(Integer, ForeignKey("velocity_models.id"), nullable=False)
+
+    # Frozen analysis context: event hypocenter, model layers, calibration
+    # coordinate, grid configuration and per-station geometry/polarity.
+    frozen = Column(JSON, nullable=False)
+
+    station_count = Column(Integer, nullable=False)      # independent stations
+    observation_count = Column(Integer, nullable=False)  # submitted picks
+    max_azimuthal_gap_deg = Column(Float, nullable=False)
+    evaluated_count = Column(Integer, nullable=False)  # distinct mechanisms searched
+    min_misfit_weight = Column(Float, nullable=False)
+    min_misfit_count = Column(Integer, nullable=False)
+    solution_count = Column(Integer, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_focal_mechanisms_created", "created_at", "id"),
+    )
+
+
+class FocalMechanismSolution(Base):
+    """One tied best-fitting double-couple mechanism of an inversion.
+
+    Rows are written once in their stable presentation order (canonical
+    plane pair), so ``(mechanism_id, sort_index)`` doubles as the
+    keyset-pagination order for the tied best solutions.
+    """
+
+    __tablename__ = "focal_mechanism_solutions"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    mechanism_id = Column(
+        String(36), ForeignKey("focal_mechanisms.id"), nullable=False, index=True
+    )
+    sort_index = Column(Integer, nullable=False)
+    # Headline plane = the canonically first of the two nodal planes.
+    strike_deg = Column(Float, nullable=False)
+    dip_deg = Column(Float, nullable=False)
+    rake_deg = Column(Float, nullable=False)
+    planes = Column(JSON, nullable=False)  # both nodal planes, canonical order
+    misfit_weight = Column(Float, nullable=False)
+    misfit_count = Column(Integer, nullable=False)
+    # Per-station observed/predicted polarity with azimuth/takeoff detail.
+    stations = Column(JSON, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("mechanism_id", "sort_index", name="uq_fm_solution_order"),
+        Index("ix_fm_solutions_mech_sort", "mechanism_id", "sort_index"),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # catalog alert orchestration
 #
 # Administrators define immutable alert rule versions over the published
